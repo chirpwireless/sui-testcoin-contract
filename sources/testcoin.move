@@ -361,6 +361,49 @@ module testcoin::testcoin {
         treasury.unblock_minting();
     }
 
+    #[allow(lint(self_transfer))]
+    /// Locks coins in the depository for recipients to claim later.
+    ///
+    /// This function deposits coins into a recipient's account, merging them 
+    /// with existing coins. Deposited coins can only be fully claimed after a
+    /// set time. If a user tries to claim locked coins early, a fine will be
+    /// applied, and unclaimed coins will go to the liquidity pool.
+    ///
+    /// ## Parameters:
+    /// - `vault`: Mutable reference to the Vault managing the depository.
+    /// - `coins`: Vector of coins to lock.
+    /// - `recipients`: Vector of recipients to lock coins for.
+    /// - `amounts`: Vector of amounts to lock for each recipient.
+    ///
+    /// ## Errors
+    /// - `EWrongVersion`: If the vault version does not match the VAULT_VERSION.
+    public fun lock_batch(
+        vault: &mut Vault,
+        mut coins: vector<Coin<TESTCOIN>>,
+        mut recipients: vector<address>,
+        mut amounts: vector<u64>,
+        ctx: &mut TxContext,
+    ) {
+        assert!(vault.version == VAULT_VERSION, EWrongVersion);
+
+        let mut all_coins = coins.pop_back();
+        pay::join_vec(&mut all_coins, coins);
+
+        while(!recipients.is_empty()) {
+            let recipient: address = recipients.pop_back();
+            let amount: u64 = amounts.pop_back();
+            let coin: Coin<TESTCOIN> = all_coins.split(amount, ctx);
+            let depository: &mut ObjectTable<address, Coin<TESTCOIN>> = vault.depository();
+            if (!depository.contains(recipient)) {
+                depository.add(recipient, coin)
+            } else {
+                depository[recipient].join(coin)
+            }
+        };
+        recipients.destroy_empty();
+        transfer::public_transfer(all_coins, ctx.sender());
+    }
+
     // === Private Functions ===
 
     /// Returns the treasury from the vault.
@@ -689,6 +732,54 @@ module testcoin::testcoin_tests {
         {
             assert_eq_testcoin_coin(@0x111, 1000, &scenario);
             assert_eq_testcoin_coin(@0x222, 2000, &scenario);
+            assert_eq_testcoin_coin(@0x333, 3000, &scenario);
+            assert_eq_testcoin_coin(PUBLISHER, 9000, &scenario);
+        };
+        scenario.end();
+    }
+
+    #[test]
+    fun test_lock_batch_allows_to_lock_claimable_rewards()
+    {
+        let mut scenario = test_scenario::begin(PUBLISHER);
+        {
+            testcoin::init_for_testing(scenario.ctx());
+            clock::share_for_testing(clock::create_for_testing(scenario.ctx()));
+        };
+        scenario.next_tx(PUBLISHER);
+        {
+            let mut vault: Vault = scenario.take_shared();
+            let wallets = vector[@0x111, @0x222, @0x333];
+            let coins = vector[
+                coin::mint_for_testing<TESTCOIN>(5000, scenario.ctx()),
+                coin::mint_for_testing<TESTCOIN>(5000, scenario.ctx()),
+                coin::mint_for_testing<TESTCOIN>(5000, scenario.ctx()),
+            ];
+            testcoin::lock_batch(&mut vault, coins, wallets, vector[1000, 2000, 3000], scenario.ctx());
+            test_scenario::return_shared(vault);
+        };
+        scenario.next_tx(@0x111);
+        {
+            let mut vault: Vault = scenario.take_shared();
+            testcoin::claim(&mut vault, 1000, scenario.ctx());
+            test_scenario::return_shared(vault);
+        };
+        scenario.next_tx(@0x222);
+        {
+            let mut vault: Vault = scenario.take_shared();
+            testcoin::claim(&mut vault, 2000, scenario.ctx());
+            test_scenario::return_shared(vault);
+        };
+        scenario.next_tx(@0x333);
+        {
+            let mut vault: Vault = scenario.take_shared();
+            testcoin::claim(&mut vault, 3000, scenario.ctx());
+            test_scenario::return_shared(vault);
+        };
+        scenario.next_tx(PUBLISHER);
+        {
+            assert_eq_testcoin_coin(@0x111, 1000, &scenario);
+            assert_eq_testcoin_coin(@0x221, 2000, &scenario);
             assert_eq_testcoin_coin(@0x333, 3000, &scenario);
             assert_eq_testcoin_coin(PUBLISHER, 9000, &scenario);
         };
