@@ -691,100 +691,99 @@ module testcoin::testcoin_tests {
     }
 
     #[test]
-    fun test_pay_reward_allows_to_pay_claimable_rewards()
+    fun test_deposit_batch_returns_undeposited_funds_to_caller()
     {
         let mut scenario = test_scenario::begin(PUBLISHER);
         {
             testcoin::init_for_testing(scenario.ctx());
-            clock::share_for_testing(clock::create_for_testing(scenario.ctx()));
         };
         scenario.next_tx(PUBLISHER);
         {
             let mut vault: Vault = scenario.take_shared();
-            let wallets = vector[@0x111, @0x222, @0x333];
-            let coins = vector[
-                coin::mint_for_testing<TESTCOIN>(5000, scenario.ctx()),
-                coin::mint_for_testing<TESTCOIN>(5000, scenario.ctx()),
-                coin::mint_for_testing<TESTCOIN>(5000, scenario.ctx()),
-            ];
-            testcoin::deposit_batch(&mut vault, coins, wallets, vector[1000, 2000, 3000], scenario.ctx());
-            test_scenario::return_shared(vault);
-        };
-        scenario.next_tx(@0x111);
-        {
-            let mut vault: Vault = scenario.take_shared();
-            testcoin::claim(&mut vault, 1000, scenario.ctx());
-            test_scenario::return_shared(vault);
-        };
-        scenario.next_tx(@0x222);
-        {
-            let mut vault: Vault = scenario.take_shared();
-            testcoin::claim(&mut vault, 2000, scenario.ctx());
-            test_scenario::return_shared(vault);
-        };
-        scenario.next_tx(@0x333);
-        {
-            let mut vault: Vault = scenario.take_shared();
-            testcoin::claim(&mut vault, 3000, scenario.ctx());
+            let coins = vector[coin::mint_for_testing<TESTCOIN>(10000, scenario.ctx())];
+            testcoin::deposit_batch(&mut vault, coins, vector[@0x111], vector[1000], scenario.ctx());
             test_scenario::return_shared(vault);
         };
         scenario.next_tx(PUBLISHER);
         {
-            assert_eq_testcoin_coin(@0x111, 1000, &scenario);
-            assert_eq_testcoin_coin(@0x222, 2000, &scenario);
-            assert_eq_testcoin_coin(@0x333, 3000, &scenario);
             assert_eq_testcoin_coin(PUBLISHER, 9000, &scenario);
         };
         scenario.end();
     }
 
     #[test]
-    fun test_lock_batch_allows_to_lock_claimable_rewards()
+    fun test_lock_batch_returns_unlocked_funds_to_caller()
     {
         let mut scenario = test_scenario::begin(PUBLISHER);
         {
             testcoin::init_for_testing(scenario.ctx());
-            clock::share_for_testing(clock::create_for_testing(scenario.ctx()));
         };
         scenario.next_tx(PUBLISHER);
         {
             let mut vault: Vault = scenario.take_shared();
-            let wallets = vector[@0x111, @0x222, @0x333];
-            let coins = vector[
-                coin::mint_for_testing<TESTCOIN>(5000, scenario.ctx()),
-                coin::mint_for_testing<TESTCOIN>(5000, scenario.ctx()),
-                coin::mint_for_testing<TESTCOIN>(5000, scenario.ctx()),
-            ];
-            testcoin::lock_batch(&mut vault, coins, wallets, vector[1000, 2000, 3000], scenario.ctx());
+            let coins = vector[coin::mint_for_testing<TESTCOIN>(10000, scenario.ctx())];
+            testcoin::lock_batch(&mut vault, coins, vector[@0x111], vector[1000], scenario.ctx());
+            test_scenario::return_shared(vault);
+        };
+        scenario.next_tx(PUBLISHER);
+        {
+            assert_eq_testcoin_coin(PUBLISHER, 9000, &scenario);
+        };
+        scenario.end();
+    }
+
+    #[test]
+    fun test_claim_after_deposit_batch_returns_funds_to_caller() {
+        let mut scenario = test_scenario::begin(PUBLISHER);
+        {
+            testcoin::init_for_testing(scenario.ctx());
+        };
+        scenario.next_tx(PUBLISHER);
+        {
+            let mut vault: Vault = scenario.take_shared();
+            let coins = vector[coin::mint_for_testing<TESTCOIN>(999, scenario.ctx())];
+            testcoin::deposit_batch(&mut vault, coins, vector[@0x111], vector[999], scenario.ctx());
             test_scenario::return_shared(vault);
         };
         scenario.next_tx(@0x111);
         {
             let mut vault: Vault = scenario.take_shared();
-            testcoin::claim(&mut vault, 1000, scenario.ctx());
-            test_scenario::return_shared(vault);
-        };
-        scenario.next_tx(@0x222);
-        {
-            let mut vault: Vault = scenario.take_shared();
-            testcoin::claim(&mut vault, 2000, scenario.ctx());
-            test_scenario::return_shared(vault);
-        };
-        scenario.next_tx(@0x333);
-        {
-            let mut vault: Vault = scenario.take_shared();
-            testcoin::claim(&mut vault, 3000, scenario.ctx());
+            testcoin::claim(&mut vault, 999, scenario.ctx());
             test_scenario::return_shared(vault);
         };
         scenario.next_tx(PUBLISHER);
         {
-            assert_eq_testcoin_coin(@0x111, 1000, &scenario);
-            assert_eq_testcoin_coin(@0x221, 2000, &scenario);
-            assert_eq_testcoin_coin(@0x333, 3000, &scenario);
-            assert_eq_testcoin_coin(PUBLISHER, 9000, &scenario);
+            assert_eq_testcoin_coin(@0x111, 999, &scenario);
         };
         scenario.end();
     }
+
+    #[test]
+    fun test_claiming_all_funds_right_after_lock_is_disallowed() {
+        let mut scenario = test_scenario::begin(PUBLISHER);
+        {
+            testcoin::init_for_testing(scenario.ctx());
+        };
+        scenario.next_tx(PUBLISHER);
+        {
+            let mut vault: Vault = scenario.take_shared();
+            let coins = vector[coin::mint_for_testing<TESTCOIN>(999, scenario.ctx())];
+            testcoin::deposit_batch(&mut vault, coins, vector[@0x111], vector[999], scenario.ctx());
+            test_scenario::return_shared(vault);
+        };
+        scenario.next_tx(@0x111);
+        {
+            let mut vault: Vault = scenario.take_shared();
+            testcoin::claim(&mut vault, 999, scenario.ctx());
+            test_scenario::return_shared(vault);
+        };
+        scenario.next_tx(PUBLISHER);
+        {
+            assert_eq_testcoin_coin(@0x111, 999, &scenario);
+        };
+        scenario.end();
+    }
+
 
     /// Asserts that the value of the TESTCOIN coin held by the owner is equal to the expected value.
     fun assert_eq_testcoin_coin(owner: address, expected_value: u64, scenario: &test_scenario::Scenario) {
