@@ -19,14 +19,14 @@ module testcoin::schedule {
             treasury::create_entry(
                 vector[STRATEGIC_SUPPORTERS.to_string(), TOKEN_TREASURY.to_string(), LIQUIDITY.to_string()],
                 vector[96_000_000_000_000_000, 127_500_000_000_000_000, 150_000_000_000_000_000],
-                1, 3600000, 0,
+                1, 300000, 0,
             ),
 
             // Stage 1
             treasury::create_entry(
                 vector[KEEPERS.to_string(), ECOSYSTEM_GROWTH_POOL.to_string(), STRATEGIC_SUPPORTERS.to_string(), TOKEN_TREASURY.to_string()],
                 vector[605_000_000_000_000, 600_000_000_000_000, 1_920_000_000_000_000, 404_761_904_761_904],
-                45, 3600000, 0,
+                45, 300000, 0,
             ),
 
             // Stage 2

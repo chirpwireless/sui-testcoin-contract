@@ -34,7 +34,7 @@ module testcoin::pool_dispatcher {
         dispatcher.pools.add(KEEPERS.to_string(), @0xd85f83d08b8e98e64bd4e3513936697f2425fa9bc36c17f433e46aef4c479c9a);
         dispatcher.pools.add(ECOSYSTEM_GROWTH_POOL.to_string(), @0x9fc2d70126a9ef36d809f92f9afacdf7cb1395fb0b3e40a9a8bfb98f0c96d3df);
         dispatcher.pools.add(STRATEGIC_SUPPORTERS.to_string(), @0x6973eeb0aad8aabd9e81f8809eff57ff1085f1796357ce853772165cdba2a0fa);
-        dispatcher.pools.add(TOKEN_TREASURY.to_string(), @0xf35a5874634876710b1808bb1d29aadd5862d12dfeedfd013a68799e42cbca02);
+        dispatcher.pools.add(TOKEN_TREASURY.to_string(), @0xf8bc181111430c80e900b7b515ee81d7f44877bd11427b784a3fd92dce390067);
         dispatcher.pools.add(TEAM.to_string(), @0xe7451e1d2e7ac6fd421b113b6871f689f3c2ccb8a4a10dc4573e82f7ad53e882);
         dispatcher.pools.add(ADVISORS.to_string(), @0xd4f29318c8656bfac19c8d2ece14560ea1b76d5db25829681a36207d17ff23be);
         dispatcher.pools.add(LIQUIDITY.to_string(), @0x2a95bdd5d3fa8413654ad2ab84b8ec1c1c4e19afd7f094ee35926c55674b5966);
