@@ -30,7 +30,7 @@ module testcoin::testcoin {
     /// 10,000,000,000 smallest units (cents) per TESTCOIN token.
     const COIN_DECIMALS: u8 = 10;
     /// Human-readable description of the TESTCOIN token.
-    const COIN_DESCRIPTION: vector<u8> = b"TESTCOIN token description";
+    const COIN_DESCRIPTION: vector<u8> = b"This token is not real and is deployed solely for testing purposes till 1st November 2024. It has no value and will never have any value. If anyone claims that this is a real token, they are a scammer.";
     /// Official name of the TESTCOIN token.
     const COIN_NAME: vector<u8> = b"Testcoin";
     /// Symbol for the TESTCOIN token, aligned with ISO 4217 formatting.
