@@ -31,13 +31,13 @@ module testcoin::pool_dispatcher {
             id: object::new(ctx),
             pools: bag::new(ctx),
         };
-        dispatcher.pools.add(KEEPERS.to_string(), @0xedb69ffab8bb0855dd27d8e3998d3e9ba361f5c37ee6388ff3cccc01c8d8a528);
-        dispatcher.pools.add(ECOSYSTEM_GROWTH_POOL.to_string(), @0x9fc2d70126a9ef36d809f92f9afacdf7cb1395fb0b3e40a9a8bfb98f0c96d3df);
-        dispatcher.pools.add(STRATEGIC_SUPPORTERS.to_string(), @0x133c277c2f72e60dca3c05b8c833df501791c66796561b73912240750a28fc79);
-        dispatcher.pools.add(TOKEN_TREASURY.to_string(), @0xe73e73ec3403e5214a27a2b05932dda125259a1836fe75ccf6e04861bf01c7c1);
-        dispatcher.pools.add(TEAM.to_string(), @0x06a80c7bf2d51920a51d26c3aa851e66fe2f827638d3b1b309eab304aaeecc15);
-        dispatcher.pools.add(ADVISORS.to_string(), @0xa2b1d1dcd669fc87a06b610ef37c2945f3195cbf4dd301652d6cfab3f38faedf);
-        dispatcher.pools.add(LIQUIDITY.to_string(), @0xd647cadb203e0aa3edbf6143b17d6ac0d9e27ec2a1c284e79eef1917b0e8e318);
+        dispatcher.pools.add(KEEPERS.to_string(), @0x67f0c9fab4b0ec5877fe83503a3b5a91b603d0e6492a7f1089d95a154c0dd7d3);
+        dispatcher.pools.add(ECOSYSTEM_GROWTH_POOL.to_string(), @0x927febeb2654b63269ca67683f9a214f021ee09c800005c04a3e33a347a0ffa3);
+        dispatcher.pools.add(STRATEGIC_SUPPORTERS.to_string(), @0x493b6b57bb2af12602a1108d6616c839a990940d728e7727b5c4fa172662f4eb);
+        dispatcher.pools.add(TOKEN_TREASURY.to_string(), @0x4f4cc0b3d0941707538bdd36fee82b76ee9d6805ac19508d37cff7fe0c5114b2);
+        dispatcher.pools.add(TEAM.to_string(), @0x6245be6621f4acb7fedb4ea2a1a25db6bee5ac4b19d37ef11848aa42d35155f8);
+        dispatcher.pools.add(ADVISORS.to_string(), @0x69f0e03cd4f1f09e75e23362c15e07513effe7a01b18ac4bffbd5ac897bf53f0);
+        dispatcher.pools.add(LIQUIDITY.to_string(), @0x795e2e8bd2b39e70ff355c9d3f92657bf627ca1de98724da6c560dc834d748fe);
         return dispatcher
     }
 
