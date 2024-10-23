@@ -38,7 +38,7 @@ module testcoin::testcoin {
     /// Coin icon
     const COIN_ICON: vector<u8> = b"https://storage.googleapis.com/tcoin/tcoin.webp";
     /// Current version of the vault.
-    const VAULT_VERSION: u64 = 1;
+    const VAULT_VERSION: u64 = 2;
     /// Pool dispatcher component name
     const POOL_DISPATCHER: vector<u8> = b"pool_dispatcher";
     /// Treasury component name
@@ -339,6 +339,12 @@ module testcoin::testcoin {
         recipients.destroy_empty();
         transfer::public_transfer(all_coins, ctx.sender());
     }
+
+    entry fun migrate( _: &ScheduleAdminCap, vault: &mut Vault) {
+        assert!(vault.version < VAULT_VERSION, ENotUpgrade);
+        vault.version = VAULT_VERSION;
+    }
+
 
     /// Unblocks minting of TESTCOIN tokens.
     ///
