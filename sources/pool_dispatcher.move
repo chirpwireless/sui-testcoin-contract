@@ -37,7 +37,7 @@ module testcoin::pool_dispatcher {
         dispatcher.pools.add(TOKEN_TREASURY.to_string(), @0x4f4cc0b3d0941707538bdd36fee82b76ee9d6805ac19508d37cff7fe0c5114b2);
         dispatcher.pools.add(TEAM.to_string(), @0x6245be6621f4acb7fedb4ea2a1a25db6bee5ac4b19d37ef11848aa42d35155f8);
         dispatcher.pools.add(ADVISORS.to_string(), @0x69f0e03cd4f1f09e75e23362c15e07513effe7a01b18ac4bffbd5ac897bf53f0);
-        dispatcher.pools.add(LIQUIDITY.to_string(), @0x795e2e8bd2b39e70ff355c9d3f92657bf627ca1de98724da6c560dc834d748fe);
+        dispatcher.pools.add(LIQUIDITY.to_string(), @0x8c305a5b03d873c3e030e355506787a57d11e03cb18d65c9be24af2dae3e7eda);
         return dispatcher
     }
 
