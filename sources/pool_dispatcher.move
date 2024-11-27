@@ -12,6 +12,7 @@ module testcoin::pool_dispatcher {
     const TEAM: vector<u8> = b"team";
     const TOKEN_TREASURY: vector<u8> = b"token_treasury";
     const LIQUIDITY: vector<u8> = b"liquidity";
+    const LOCKUP: vector<u8> = b"lockup";
 
     // === Structs ===
 
@@ -38,6 +39,7 @@ module testcoin::pool_dispatcher {
         dispatcher.pools.add(TEAM.to_string(), @0xcd43e11fad9a01caad85159c9bf9aa02bbd5910eea2d6f95531d8ad1f1272ef7);
         dispatcher.pools.add(ADVISORS.to_string(), @0xee7c15989e4f071ef022b5ea27420e855c08395bec4998fc54820c9a682e84b7);
         dispatcher.pools.add(LIQUIDITY.to_string(), @0xeae12f80d9b462b60284984a3d6a216f4edcf4cc31c18842941c95fd030aa47f);
+        dispatcher.pools.add(LOCKUP.to_string(), @0xf984db9a25afa6c73aae9ba20ff9c43919ac717881d6dfbb7d0149b7888e8b42);
         return dispatcher
     }
 

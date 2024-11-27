@@ -1,5 +1,6 @@
 module testcoin::testcoin {
     // === Imports ===
+    use testcoin::vesting_ledger::{Self, VestingLedger};
     use testcoin::pool_dispatcher::{Self, PoolDispatcher};
     use testcoin::schedule::{Self};
     use testcoin::treasury::{Self, Treasury};
@@ -19,9 +20,10 @@ module testcoin::testcoin {
     /// Error code used when a function call is made from an incompatible
     /// package version.
     const EWrongVersion: u64 = 2;
-
     /// Error code used when an invalid pool is used in the schedule.
     const EInvalidPool: u64 = 3;
+    /// Error code used when a user tries to claim more coins than they have.
+    const ENotEnoughFunds: u64 = 4;
 
     // === Constants ===
     /// Maximum supply of TESTCOIN tokens.
@@ -37,6 +39,8 @@ module testcoin::testcoin {
     const COIN_SYMBOL: vector<u8> = b"TCON";
     /// Coin icon
     const COIN_ICON: vector<u8> = b"https://storage.googleapis.com/tcoin/tcoin.webp";
+    /// Default vesting period.
+    const VESTING_PERIOD: u64 = 10;
     /// Current version of the vault.
     const VAULT_VERSION: u64 = 1;
     /// Pool dispatcher component name
@@ -45,6 +49,8 @@ module testcoin::testcoin {
     const TREASURY: vector<u8> = b"treasury";
     /// Depository component name
     const DEPOSITORY: vector<u8> = b"depository";
+    /// Vesting ledger component name
+    const VESTING_LEDGER: vector<u8> = b"vesting_ledger";
 
     // === Structs ===
     /// The one-time witness for the module
@@ -101,6 +107,7 @@ module testcoin::testcoin {
         vault.registry.add(POOL_DISPATCHER.to_string(), pool_dispatcher::default(ctx));
         vault.registry.add(TREASURY.to_string(), treasury::create(treasury_cap, COIN_MAX_SUPPLY, schedule::default(), ctx));
         vault.registry.add(DEPOSITORY.to_string(), object_table::new<address, Coin<TESTCOIN>>(ctx));
+        vault.registry.add(VESTING_LEDGER.to_string(), vesting_ledger::create(VESTING_PERIOD, ctx));
 
         vault.premint(ctx);
 
@@ -138,8 +145,8 @@ module testcoin::testcoin {
             };
             pools.destroy_empty();
             coins.destroy_empty();
-        }
-
+        };
+        vault.vesting_ledger().advance_epoch();
     }
 
     /// Replaces a schedule entry in the `Vault` of TESTCOIN tokens.
@@ -290,12 +297,10 @@ module testcoin::testcoin {
     /// - `EWrongVersion`: If the vault version does not match the VAULT_VERSION.
     entry fun claim(vault: &mut Vault, amount: u64, ctx: &mut TxContext) {
         assert!(vault.version == VAULT_VERSION, EWrongVersion);
-        let depository: &mut ObjectTable<address, Coin<TESTCOIN>> = vault.depository();
-        let coin = depository[ctx.sender()].split(amount, ctx);
-        if (depository[ctx.sender()].value() == 0) {
-            depository.remove(ctx.sender()).destroy_zero();
-        };
-        transfer::public_transfer(coin, ctx.sender());
+        let ledger: &VestingLedger = vault.vesting_ledger();
+        assert!(ledger.available_balance(ctx.sender()) >= amount, ENotEnoughFunds);
+        let total = &mut vault.depository()[ctx.sender()];
+        transfer::public_transfer(total.split(amount, ctx), ctx.sender());
     }
 
     #[allow(lint(self_transfer))]
@@ -334,7 +339,8 @@ module testcoin::testcoin {
                 depository.add(recipient, coin)
             } else {
                 depository[recipient].join(coin)
-            }
+            };
+            vault.vesting_ledger().deposit(recipient, amount, ctx);
         };
         recipients.destroy_empty();
         transfer::public_transfer(all_coins, ctx.sender());
@@ -398,7 +404,8 @@ module testcoin::testcoin {
                 depository.add(recipient, coin)
             } else {
                 depository[recipient].join(coin)
-            }
+            };
+            vault.vesting_ledger().lock(recipient, amount, ctx);
         };
         recipients.destroy_empty();
         transfer::public_transfer(all_coins, ctx.sender());
@@ -419,6 +426,11 @@ module testcoin::testcoin {
     /// Returns the depository from the vault.
     fun depository(vault: &mut Vault): &mut ObjectTable<address, Coin<TESTCOIN>> {
         &mut vault.registry[DEPOSITORY.to_string()]
+    }
+
+    /// Returns the vesting ledger from the vault.
+    fun vesting_ledger(vault: &mut Vault): &mut VestingLedger {
+        &mut vault.registry[VESTING_LEDGER.to_string()]
     }
 
     /// Premints the initial supply of TESTCOIN tokens.
@@ -461,14 +473,15 @@ module testcoin::testcoin {
 
 #[test_only]
 module testcoin::testcoin_tests {
-    use testcoin::testcoin::{Self, TESTCOIN, EInvalidPool, ScheduleAdminCap, Vault};
-    use std::string;
+    use testcoin::testcoin::{Self, TESTCOIN, EInvalidPool, ENotEnoughFunds, ScheduleAdminCap, Vault};
+    use std::string::{Self};
     use sui::clock::{Self, Clock};
     use sui::coin::{Self};
-    use sui::test_scenario;
+    use sui::test_scenario::{Self};
     use sui::test_utils;
 
     const PUBLISHER: address = @0xA;
+    const USER: address = @0xB;
     const TEST_POOL: vector<u8> = b"test_pool";
     const NON_EXISTENT_POOL: vector<u8> = b"non_existent_pool";
 
@@ -701,7 +714,7 @@ module testcoin::testcoin_tests {
         {
             let mut vault: Vault = scenario.take_shared();
             let coins = vector[coin::mint_for_testing<TESTCOIN>(10000, scenario.ctx())];
-            testcoin::deposit_batch(&mut vault, coins, vector[@0x111], vector[1000], scenario.ctx());
+            testcoin::deposit_batch(&mut vault, coins, vector[USER], vector[1000], scenario.ctx());
             test_scenario::return_shared(vault);
         };
         scenario.next_tx(PUBLISHER);
@@ -722,7 +735,7 @@ module testcoin::testcoin_tests {
         {
             let mut vault: Vault = scenario.take_shared();
             let coins = vector[coin::mint_for_testing<TESTCOIN>(10000, scenario.ctx())];
-            testcoin::lock_batch(&mut vault, coins, vector[@0x111], vector[1000], scenario.ctx());
+            testcoin::lock_batch(&mut vault, coins, vector[USER], vector[1000], scenario.ctx());
             test_scenario::return_shared(vault);
         };
         scenario.next_tx(PUBLISHER);
@@ -741,25 +754,26 @@ module testcoin::testcoin_tests {
         scenario.next_tx(PUBLISHER);
         {
             let mut vault: Vault = scenario.take_shared();
-            let coins = vector[coin::mint_for_testing<TESTCOIN>(999, scenario.ctx())];
-            testcoin::deposit_batch(&mut vault, coins, vector[@0x111], vector[999], scenario.ctx());
+            let coins = vector[coin::mint_for_testing<TESTCOIN>(1000, scenario.ctx())];
+            testcoin::deposit_batch(&mut vault, coins, vector[USER], vector[1000], scenario.ctx());
             test_scenario::return_shared(vault);
         };
-        scenario.next_tx(@0x111);
+        scenario.next_tx(USER);
         {
             let mut vault: Vault = scenario.take_shared();
-            testcoin::claim(&mut vault, 999, scenario.ctx());
+            testcoin::claim(&mut vault, 1000, scenario.ctx());
             test_scenario::return_shared(vault);
         };
         scenario.next_tx(PUBLISHER);
         {
-            assert_eq_testcoin_coin(@0x111, 999, &scenario);
+            assert_eq_testcoin_coin(USER, 1000, &scenario);
         };
         scenario.end();
     }
 
     #[test]
-    fun test_claiming_all_funds_right_after_lock_is_disallowed() {
+    #[expected_failure(abort_code = ENotEnoughFunds)]
+    fun test_claiming_more_then_available_deposited_coins_fails() {
         let mut scenario = test_scenario::begin(PUBLISHER);
         {
             testcoin::init_for_testing(scenario.ctx());
@@ -767,23 +781,44 @@ module testcoin::testcoin_tests {
         scenario.next_tx(PUBLISHER);
         {
             let mut vault: Vault = scenario.take_shared();
-            let coins = vector[coin::mint_for_testing<TESTCOIN>(999, scenario.ctx())];
-            testcoin::deposit_batch(&mut vault, coins, vector[@0x111], vector[999], scenario.ctx());
+            let coins = vector[coin::mint_for_testing<TESTCOIN>(1000, scenario.ctx())];
+            testcoin::deposit_batch(&mut vault, coins, vector[USER], vector[1000], scenario.ctx());
             test_scenario::return_shared(vault);
         };
-        scenario.next_tx(@0x111);
+        scenario.next_tx(USER);
         {
             let mut vault: Vault = scenario.take_shared();
-            testcoin::claim(&mut vault, 999, scenario.ctx());
+            // Claiming more than was deposited should fail
+            testcoin::claim(&mut vault, 1001, scenario.ctx());
             test_scenario::return_shared(vault);
-        };
-        scenario.next_tx(PUBLISHER);
-        {
-            assert_eq_testcoin_coin(@0x111, 999, &scenario);
         };
         scenario.end();
     }
 
+    #[test]
+    #[expected_failure(abort_code = ENotEnoughFunds)]
+    fun test_claiming_more_than_available_locked_coins_fails() {
+        let mut scenario = test_scenario::begin(PUBLISHER);
+        {
+            testcoin::init_for_testing(scenario.ctx());
+        };
+        scenario.next_tx(PUBLISHER);
+        {
+            let mut vault: Vault = scenario.take_shared();
+            let coins = vector[coin::mint_for_testing<TESTCOIN>(1000, scenario.ctx())];
+            testcoin::lock_batch(&mut vault, coins, vector[USER], vector[1000], scenario.ctx());
+            test_scenario::return_shared(vault);
+        };
+        scenario.next_tx(USER);
+        {
+            let mut vault: Vault = scenario.take_shared();
+            // User can claim only 10% immediately. If he tries to claim more,
+            // it should fail
+            testcoin::claim(&mut vault, 101, scenario.ctx());
+            test_scenario::return_shared(vault);
+        };
+        scenario.end();
+    }
 
     /// Asserts that the value of the TESTCOIN coin held by the owner is equal to the expected value.
     fun assert_eq_testcoin_coin(owner: address, expected_value: u64, scenario: &test_scenario::Scenario) {
