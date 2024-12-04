@@ -426,4 +426,103 @@ module testcoin::vesting_ledger_tests {
         test_utils::assert_eq(penalty, 172);
         test_utils::destroy(ledger);
     }
+
+    #[test]
+    fun test_penalty_on_claim_is_reduced_according_to_elapsed_epochs() {
+        let mut ledger = vesting_ledger::create(10, &mut tx_context::dummy());
+        ledger.lock(USER, 1000, &mut tx_context::dummy());
+        test_utils::assert_eq(ledger.available_balance(USER), 100);
+
+        ledger.advance_epoch();
+        ledger.advance_epoch();
+        ledger.advance_epoch();
+        // Now 40% of coins are available, because each epoch unlocks 10%.
+        test_utils::assert_eq(ledger.available_balance(USER), 400);
+
+        // Claiming 100 coins now would incur only 150 coins of penalty
+        // (instead of 900) since the penalty is reduced accordingly to elapsed
+        // epochs.
+        let penalty = ledger.claim(USER, 100);
+        test_utils::assert_eq(ledger.available_balance(USER), 300);
+        test_utils::assert_eq(penalty, 150);
+
+        test_utils::destroy(ledger);
+    }
+
+    #[test]
+    fun test_no_penalty_after_all_coins_are_unlocked() {
+        let mut ledger = vesting_ledger::create(10, &mut tx_context::dummy());
+        ledger.lock(USER, 1000, &mut tx_context::dummy());
+        test_utils::assert_eq(ledger.available_balance(USER), 100);
+
+        ledger.advance_epoch();
+        test_utils::assert_eq(ledger.available_balance(USER), 200);
+        ledger.advance_epoch();
+        test_utils::assert_eq(ledger.available_balance(USER), 300);
+        ledger.advance_epoch();
+        test_utils::assert_eq(ledger.available_balance(USER), 400);
+        ledger.advance_epoch();
+        test_utils::assert_eq(ledger.available_balance(USER), 500);
+        ledger.advance_epoch();
+        test_utils::assert_eq(ledger.available_balance(USER), 600);
+        ledger.advance_epoch();
+        test_utils::assert_eq(ledger.available_balance(USER), 700);
+        ledger.advance_epoch();
+        test_utils::assert_eq(ledger.available_balance(USER), 800);
+        ledger.advance_epoch();
+        test_utils::assert_eq(ledger.available_balance(USER), 900);
+        ledger.advance_epoch();
+        test_utils::assert_eq(ledger.available_balance(USER), 1000);
+        let penalty = ledger.claim(USER, 1000);
+        test_utils::assert_eq(ledger.available_balance(USER), 0);
+        test_utils::assert_eq(penalty, 0);
+
+        test_utils::destroy(ledger);
+    }
+
+    #[test]
+    fun test_claim_happens_for_first_locks_first() {
+        let mut ledger = vesting_ledger::create(10, &mut tx_context::dummy());
+        ledger.lock(USER, 1000, &mut tx_context::dummy());
+        test_utils::assert_eq(ledger.available_balance(USER), 100);
+        ledger.advance_epoch();
+        ledger.lock(USER, 1000, &mut tx_context::dummy());
+        test_utils::assert_eq(ledger.available_balance(USER), 300);
+
+        // Now it should be "unloked" to claim 20% of first 1000 coins and,
+        // 10% of the second 1000 coins. So 300 coins in total.
+        // Now we claim 100 coins, which should be taken from the first lock, so
+        // 100 coins from first 1000 + 100 coins from the second 1000 must
+        // remain available. And penalty must be deducted from the first 1000
+        // only.
+
+        let penalty = ledger.claim(USER, 100);
+        test_utils::assert_eq(ledger.available_balance(USER), 200);
+        test_utils::assert_eq(penalty, 400);
+        
+        test_utils::destroy(ledger);
+    }
+
+    #[test]
+    fun test_penalty_be_deducted_only_for_locked_coins() {
+        let mut ledger = vesting_ledger::create(10, &mut tx_context::dummy());
+        ledger.deposit(USER, 1000, &mut tx_context::dummy());
+        ledger.lock(USER, 1000, &mut tx_context::dummy());
+        // User is able to claim full amount of deposited coins, and 10% of
+        // locked.
+        test_utils::assert_eq(ledger.available_balance(USER), 1000+100);
+
+        // Claiming 1-1000 coins in current situation must not incur any penalties.
+        let penalty = ledger.claim(USER, 1000);
+        test_utils::assert_eq(ledger.available_balance(USER), 100);
+        test_utils::assert_eq(penalty, 0);
+
+        // Claiming 100 coins now, would incur 900 coins of penalty since other
+        // coins were "locked" and not "deposited".
+        let penalty = ledger.claim(USER, 100);
+        test_utils::assert_eq(ledger.available_balance(USER), 0);
+        test_utils::assert_eq(penalty, 900);
+
+        test_utils::destroy(ledger);
+    }
 }
