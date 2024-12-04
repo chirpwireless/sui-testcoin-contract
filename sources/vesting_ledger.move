@@ -5,6 +5,8 @@ module testcoin::vesting_ledger {
     // === Constants ===
 
     // === Errors ===
+    /// Error code indicating invalid amount in request.
+    const EInvalidAmount: u64 = 1;
 
     // === Structs ===
     public struct AccountEntry has store {
@@ -81,6 +83,45 @@ module testcoin::vesting_ledger {
         });
     }
 
+    public(package) fun claim(
+        ledger: &mut VestingLedger,
+        user: address,
+        mut amount: u64,
+    ): u64 {
+        assert!(amount > 0, EInvalidAmount);
+        let current_epoch = ledger.current_epoch;
+        let unlock_per_epoch = 100 / ledger.period;
+        let account = &mut ledger.accounts[user];
+        let to_claim = if (amount <= account.instant_balance) {
+            amount
+        } else {
+            account.instant_balance
+        };
+        account.instant_balance = account.instant_balance - to_claim;
+        amount = amount - to_claim;
+        let mut i = 0;
+        let len = account.entries.length();
+        let mut penalty: u64 = 0;
+        while(i < len && amount > 0) {
+            let entry = &mut account.entries[i];
+            let elapsed_epochs = current_epoch - entry.epoch;
+            let mut claimable_percentage = (elapsed_epochs + 1) * unlock_per_epoch;
+            if (claimable_percentage > 100) {
+                claimable_percentage = 100;
+            };
+
+            let max_claimable = (entry.balance * claimable_percentage) / 100;
+            let to_claim = if (amount <= max_claimable) amount else max_claimable;
+            let proportional_penalty = (to_claim * (entry.balance - max_claimable)) / max_claimable;
+            entry.balance = entry.balance - to_claim - proportional_penalty;
+            penalty = penalty + proportional_penalty;
+            amount = amount - to_claim;
+
+            i = i + 1;
+        };
+        penalty
+    }
+
     public(package) fun available_balance(
         ledger: &VestingLedger,
         user: address,
@@ -127,12 +168,11 @@ module testcoin::vesting_ledger {
         };
         &mut ledger.accounts[user]
     }
-
 }
 
 #[test_only]
 module testcoin::vesting_ledger_tests {
-    use testcoin::vesting_ledger::{Self};
+    use testcoin::vesting_ledger::{Self, EInvalidAmount};
     use sui::test_utils;
 
     const USER: address = @0xB;
@@ -261,6 +301,129 @@ module testcoin::vesting_ledger_tests {
         test_utils::assert_eq(ledger.available_balance(USER), 100);
         ledger.advance_epoch();
         test_utils::assert_eq(ledger.available_balance(USER), 100);
+        test_utils::destroy(ledger);
+    }
+
+    #[test]
+    #[expected_failure]
+    fun test_claiming_fails_for_nonexistent_account() {
+        let mut ledger = vesting_ledger::create(10, &mut tx_context::dummy());
+        let _penalty = ledger.claim(USER, 1000);
+        test_utils::destroy(ledger);
+    }
+
+    #[test]
+    #[expected_failure(abort_code = EInvalidAmount)]
+    fun test_claiming_fails_for_zero_amount() {
+        let mut ledger = vesting_ledger::create(10, &mut tx_context::dummy());
+        ledger.deposit(USER, 1000, &mut tx_context::dummy());
+        let _penalty = ledger.claim(USER, 0);
+        test_utils::destroy(ledger);
+    }
+
+    #[test]
+    fun test_claiming_immediately_deposited_coins_reduces_user_account() {
+        let mut ledger = vesting_ledger::create(10, &mut tx_context::dummy());
+        ledger.deposit(USER, 1000, &mut tx_context::dummy());
+        test_utils::assert_eq(ledger.available_balance(USER), 1000);
+        let penalty = ledger.claim(USER, 1000);
+        test_utils::assert_eq(ledger.available_balance(USER), 0);
+        test_utils::assert_eq(penalty, 0);
+        test_utils::destroy(ledger);
+    }
+
+    #[test]
+    fun test_partial_claim_reduces_account_proportionally() {
+        let mut ledger = vesting_ledger::create(10, &mut tx_context::dummy());
+        ledger.deposit(USER, 1000, &mut tx_context::dummy());
+        test_utils::assert_eq(ledger.available_balance(USER), 1000);
+        let penalty = ledger.claim(USER, 300);
+        test_utils::assert_eq(ledger.available_balance(USER), 700);
+        test_utils::assert_eq(penalty, 0);
+        test_utils::destroy(ledger);
+    }
+
+    #[test]
+    fun test_claiming_locked_coins_too_soon_incurs_penalty() {
+        let mut ledger = vesting_ledger::create(10, &mut tx_context::dummy());
+        ledger.lock(USER, 1000, &mut tx_context::dummy());
+        test_utils::assert_eq(ledger.available_balance(USER), 100);
+        let penalty = ledger.claim(USER, 100);
+        test_utils::assert_eq(ledger.available_balance(USER), 0);
+        test_utils::assert_eq(penalty, 900);
+        test_utils::destroy(ledger);
+    }
+
+    #[test]
+    fun test_partial_claiming_locked_coins_incurs_proportional_penalty() {
+        let mut ledger = vesting_ledger::create(10, &mut tx_context::dummy());
+        ledger.lock(USER, 1000, &mut tx_context::dummy());
+        test_utils::assert_eq(ledger.available_balance(USER), 100);
+
+        let penalty = ledger.claim(USER, 10);
+        test_utils::assert_eq(ledger.available_balance(USER), 90);
+        test_utils::assert_eq(penalty, 90);
+
+        let penalty = ledger.claim(USER, 10);
+        test_utils::assert_eq(ledger.available_balance(USER), 80);
+        test_utils::assert_eq(penalty, 90);
+
+        let penalty = ledger.claim(USER, 10);
+        test_utils::assert_eq(ledger.available_balance(USER), 70);
+        test_utils::assert_eq(penalty, 90);
+
+        let penalty = ledger.claim(USER, 10);
+        test_utils::assert_eq(ledger.available_balance(USER), 60);
+        test_utils::assert_eq(penalty, 90);
+
+        let penalty = ledger.claim(USER, 10);
+        test_utils::assert_eq(ledger.available_balance(USER), 50);
+        test_utils::assert_eq(penalty, 90);
+
+        let penalty = ledger.claim(USER, 10);
+        test_utils::assert_eq(ledger.available_balance(USER), 40);
+        test_utils::assert_eq(penalty, 90);
+
+        let penalty = ledger.claim(USER, 10);
+        test_utils::assert_eq(ledger.available_balance(USER), 30);
+        test_utils::assert_eq(penalty, 90);
+
+        let penalty = ledger.claim(USER, 10);
+        test_utils::assert_eq(ledger.available_balance(USER), 20);
+        test_utils::assert_eq(penalty, 90);
+
+        let penalty = ledger.claim(USER, 10);
+        test_utils::assert_eq(ledger.available_balance(USER), 10);
+        test_utils::assert_eq(penalty, 90);
+
+        let penalty = ledger.claim(USER, 10);
+        test_utils::assert_eq(ledger.available_balance(USER), 0);
+        test_utils::assert_eq(penalty, 90);
+        test_utils::destroy(ledger);
+    }
+
+    #[test]
+    fun test_claiming_on_uneven_period() {
+        let mut ledger = vesting_ledger::create(3, &mut tx_context::dummy());
+        ledger.lock(USER, 1000, &mut tx_context::dummy());
+        test_utils::assert_eq(ledger.available_balance(USER), 330);
+
+        let penalty = ledger.claim(USER, 82);
+        test_utils::assert_eq(ledger.available_balance(USER), 248);
+        test_utils::assert_eq(penalty, 166);
+
+        let penalty = ledger.claim(USER, 82);
+        test_utils::assert_eq(ledger.available_balance(USER), 166);
+        test_utils::assert_eq(penalty, 166);
+
+        let penalty = ledger.claim(USER, 82);
+        test_utils::assert_eq(ledger.available_balance(USER), 84);
+        test_utils::assert_eq(penalty, 166);
+
+        // Still can claim all the remaining coins.
+        let penalty = ledger.claim(USER, 84);
+        test_utils::assert_eq(ledger.available_balance(USER), 0);
+        test_utils::assert_eq(penalty, 172);
         test_utils::destroy(ledger);
     }
 }

@@ -297,8 +297,14 @@ module testcoin::testcoin {
     /// - `EWrongVersion`: If the vault version does not match the VAULT_VERSION.
     entry fun claim(vault: &mut Vault, amount: u64, ctx: &mut TxContext) {
         assert!(vault.version == VAULT_VERSION, EWrongVersion);
-        let ledger: &VestingLedger = vault.vesting_ledger();
+        let ledger: &mut VestingLedger = vault.vesting_ledger();
         assert!(ledger.available_balance(ctx.sender()) >= amount, ENotEnoughFunds);
+        let penalty_amount = ledger.claim(ctx.sender(), amount);
+        if (penalty_amount > 0) {
+            let total = &mut vault.depository()[ctx.sender()];
+            let penalty = total.split(penalty_amount, ctx);
+            vault.pool_dispatcher().transfer(b"lockup".to_string(), penalty);
+        };
         let total = &mut vault.depository()[ctx.sender()];
         transfer::public_transfer(total.split(amount, ctx), ctx.sender());
     }
@@ -474,10 +480,10 @@ module testcoin::testcoin {
 #[test_only]
 module testcoin::testcoin_tests {
     use testcoin::testcoin::{Self, TESTCOIN, EInvalidPool, ENotEnoughFunds, ScheduleAdminCap, Vault};
-    use std::string::{Self};
+    use std::string::{Self, String};
     use sui::clock::{Self, Clock};
     use sui::coin::{Self};
-    use sui::test_scenario::{Self};
+    use sui::test_scenario::{Self, Scenario};
     use sui::test_utils;
 
     const PUBLISHER: address = @0xA;
@@ -820,8 +826,49 @@ module testcoin::testcoin_tests {
         scenario.end();
     }
 
+    #[test]
+    fun test_claiming_locked_coins_early_involves_penalties() {
+        let mut scenario = test_scenario::begin(PUBLISHER);
+        {
+            testcoin::init_for_testing(scenario.ctx());
+            clock::share_for_testing(clock::create_for_testing(scenario.ctx()));
+        };
+        scenario.next_tx(PUBLISHER);
+        {
+            let mut vault: Vault = scenario.take_shared();
+            let cap: ScheduleAdminCap = test_scenario::take_from_sender(&scenario);
+            testcoin::unblock_minting(&cap, &mut vault);
+
+            let coins = vector[coin::mint_for_testing<TESTCOIN>(1000, scenario.ctx())];
+            testcoin::lock_batch(&mut vault, coins, vector[USER], vector[1000], scenario.ctx());
+            test_scenario::return_to_sender(&scenario, cap);
+            test_scenario::return_shared(vault);
+        };
+        scenario.next_tx(USER);
+        {
+            let mut vault: Vault = scenario.take_shared();
+            // Claiming 10% of the funds immediately after locking would include 90% fines
+            testcoin::claim(&mut vault, 100, scenario.ctx());
+            test_scenario::return_shared(vault);
+        };
+        scenario.next_tx(USER);
+        {
+            let mut vault: Vault = scenario.take_shared();
+            assert_eq_testcoin_coin(USER, 100, &scenario);
+            assert_pool_eq_testcoin_coin(&mut vault, b"lockup".to_string(), 900, &scenario);
+            test_scenario::return_shared(vault);
+        };
+        scenario.end();
+    }
+
     /// Asserts that the value of the TESTCOIN coin held by the owner is equal to the expected value.
     fun assert_eq_testcoin_coin(owner: address, expected_value: u64, scenario: &test_scenario::Scenario) {
+        test_utils::assert_eq(total_coins(owner, scenario), expected_value);
+    }
+
+    /// Asserts that the TESTCOIN pool's value matches the expected value.
+    fun assert_pool_eq_testcoin_coin(vault: &mut Vault, name: String, expected_value: u64, scenario: &Scenario) {
+        let owner = vault.get_address_pool(name);
         test_utils::assert_eq(total_coins(owner, scenario), expected_value);
     }
 
