@@ -9,6 +9,7 @@ module testcoin::vesting_ledger {
     const EInvalidAmount: u64 = 1;
 
     // === Structs ===
+    /// A single entry in the account's ledger.
     public struct AccountEntry has store {
         /// The epoch number.
         epoch: u64,
@@ -16,6 +17,7 @@ module testcoin::vesting_ledger {
         balance: u64,
     }
 
+    /// A single account in the vesting ledger.
     public struct Account has key, store {
         /// The unique identifier of the account.
         id: UID,
@@ -25,6 +27,7 @@ module testcoin::vesting_ledger {
         entries: vector<AccountEntry>,
     }
 
+    /// The vesting ledger for multiple accounts.
     public struct VestingLedger has key, store{
         /// The unique identifier of the ledger.
         id: UID,
@@ -151,6 +154,13 @@ module testcoin::vesting_ledger {
         ledger: &mut VestingLedger,
     ) {
         ledger.current_epoch = ledger.current_epoch + 1;
+    }
+
+    public(package) fun set_vesting_period(
+        ledger: &mut VestingLedger,
+        period: u64,
+    ) {
+        ledger.period = period;
     }
 
     // === Internal functions ===
@@ -522,6 +532,35 @@ module testcoin::vesting_ledger_tests {
         let penalty = ledger.claim(USER, 100);
         test_utils::assert_eq(ledger.available_balance(USER), 0);
         test_utils::assert_eq(penalty, 900);
+
+        test_utils::destroy(ledger);
+    }
+
+    #[test]
+    fun test_changing_vesting_period_changes_available_balance() {
+        let mut ledger = vesting_ledger::create(10, &mut tx_context::dummy());
+        ledger.lock(USER, 1000, &mut tx_context::dummy());
+        test_utils::assert_eq(ledger.available_balance(USER), 100);
+
+        ledger.set_vesting_period(5);
+        test_utils::assert_eq(ledger.available_balance(USER), 200);
+
+        test_utils::destroy(ledger);
+    }
+
+    #[test]
+    fun test_update_vesting_period_alters_locked_coins_balance() {
+        let mut ledger = vesting_ledger::create(10, &mut tx_context::dummy());
+        ledger.lock(USER, 1000, &mut tx_context::dummy());
+        test_utils::assert_eq(ledger.available_balance(USER), 100);
+
+        ledger.advance_epoch();
+        ledger.advance_epoch();
+        ledger.advance_epoch();
+        test_utils::assert_eq(ledger.available_balance(USER), 400);
+
+        ledger.set_vesting_period(5);
+        test_utils::assert_eq(ledger.available_balance(USER), 800);
 
         test_utils::destroy(ledger);
     }

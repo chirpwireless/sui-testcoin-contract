@@ -42,7 +42,7 @@ module testcoin::testcoin {
     /// Default vesting period.
     const VESTING_PERIOD: u64 = 10;
     /// Current version of the vault.
-    const VAULT_VERSION: u64 = 1;
+    const VAULT_VERSION: u64 = 2;
     /// Pool dispatcher component name
     const POOL_DISPATCHER: vector<u8> = b"pool_dispatcher";
     /// Treasury component name
@@ -63,6 +63,17 @@ module testcoin::testcoin {
     /// ensures that schedule modifications are restricted to authorized
     /// personnel only.
     public struct ScheduleAdminCap has key, store {
+        /// Unique identifier for the administrative capability.
+        id: UID,
+    }
+
+    /// Administrative capability for modifying vesting rules.
+    /// 
+    /// This struct acts as an authorization object, enabling its holder to
+    /// to perform authorized actions related to vesting, such as modifying
+    ///  vesting period. It ensures that vesting modifications are restricted
+    /// to authorized personnel only.
+    public struct VestingAdminCap has key, store {
         /// Unique identifier for the administrative capability.
         id: UID,
     }
@@ -112,6 +123,7 @@ module testcoin::testcoin {
         vault.premint(ctx);
 
         transfer::transfer(ScheduleAdminCap{id:object::new(ctx)}, ctx.sender());
+        transfer::transfer(VestingAdminCap{id:object::new(ctx)}, ctx.sender());
         transfer::share_object(vault);
     }
 
@@ -417,6 +429,56 @@ module testcoin::testcoin {
         transfer::public_transfer(all_coins, ctx.sender());
     }
 
+    /// Sets the vesting period.
+    ///
+    /// This function allows authorized users, holding the VestingAdminCap, to
+    /// set the new vesting period. Changing the vesting period affects all
+    /// previously locked coins.
+    ///
+    /// ## Parameters:
+    /// - `_`: Reference to the VestingAdminCap, ensuring execution by authorized users only.
+    /// - `vault`: Mutable reference to the Vault managing the vesting ledger.
+    /// - `period`: The new vesting period in epochs.
+    ///
+    /// ## Errors
+    /// - `EWrongVersion`: If the vault version does not match the VAULT_VERSION.
+    public fun set_vesting_period(
+        _: &VestingAdminCap,
+        vault: &mut Vault,
+        period: u64,
+    ) {
+        assert!(vault.version == VAULT_VERSION, EWrongVersion);
+
+        let ledger: &mut VestingLedger = vault.vesting_ledger();
+        ledger.set_vesting_period(period);
+    }
+
+    /// Migrates the vault to the latest version.
+    /// 
+    /// This function migrates the vault to the latest version. It is used to
+    /// update the on-chain vault data according to the latest version of the
+    /// smart-contract code.
+    ///
+    /// ## Parameters:
+    /// - `_`: Reference to the ScheduleAdminCap, ensuring execution by authorized users only.
+    /// - `vault`: Mutable reference to the Vault to migrate.
+    ///
+    /// ## Errors
+    /// - `ENotUpgrade`: If the migration is not considered an upgrade.
+    entry fun migrate(
+        _: &ScheduleAdminCap,
+        vault: &mut Vault,
+        ctx: &mut TxContext,
+    ) {
+        assert!(vault.version < VAULT_VERSION, ENotUpgrade);
+        if (vault.version == 1) {
+            vault.registry.add(VESTING_LEDGER.to_string(), vesting_ledger::create(VESTING_PERIOD, ctx));
+            transfer::transfer(VestingAdminCap{id:object::new(ctx)}, ctx.sender());
+            vault.version = vault.version + 1;
+        };
+        vault.version = VAULT_VERSION;
+    }
+
     // === Private Functions ===
 
     /// Returns the treasury from the vault.
@@ -479,7 +541,15 @@ module testcoin::testcoin {
 
 #[test_only]
 module testcoin::testcoin_tests {
-    use testcoin::testcoin::{Self, TESTCOIN, EInvalidPool, ENotEnoughFunds, ScheduleAdminCap, Vault};
+    use testcoin::testcoin::{
+        Self,
+        TESTCOIN,
+        EInvalidPool,
+        ENotEnoughFunds,
+        ScheduleAdminCap,
+        Vault,
+        VestingAdminCap,
+    };
     use std::string::{Self, String};
     use sui::clock::{Self, Clock};
     use sui::coin::{Self};
@@ -856,6 +926,49 @@ module testcoin::testcoin_tests {
             let mut vault: Vault = scenario.take_shared();
             assert_eq_testcoin_coin(USER, 100, &scenario);
             assert_pool_eq_testcoin_coin(&mut vault, b"lockup".to_string(), 900, &scenario);
+            test_scenario::return_shared(vault);
+        };
+        scenario.end();
+    }
+
+    #[test]
+    fun test_set_vesting_period_changes_vesting_period() {
+        let mut scenario = test_scenario::begin(PUBLISHER);
+        {
+            testcoin::init_for_testing(scenario.ctx());
+        };
+        scenario.next_tx(PUBLISHER);
+        {
+            let mut vault: Vault = scenario.take_shared();
+            let vest_cap: VestingAdminCap = test_scenario::take_from_sender(&scenario);
+            testcoin::set_vesting_period(&vest_cap, &mut vault, 20);
+            let sched_cap: ScheduleAdminCap = test_scenario::take_from_sender(&scenario);
+            testcoin::unblock_minting(&sched_cap, &mut vault);
+            test_scenario::return_shared(vault);
+            test_scenario::return_to_sender(&scenario, vest_cap);
+            test_scenario::return_to_sender(&scenario, sched_cap);
+        };
+        scenario.next_tx(PUBLISHER);
+        {
+            let mut vault: Vault = scenario.take_shared();
+
+            let coins = vector[coin::mint_for_testing<TESTCOIN>(1000, scenario.ctx())];
+            testcoin::lock_batch(&mut vault, coins, vector[USER], vector[1000], scenario.ctx());
+
+            test_scenario::return_shared(vault);
+        };
+        scenario.next_tx(USER);
+        {
+            let mut vault: Vault = scenario.take_shared();
+            // Now user could claim only 5% of coins, instead of default 10%.
+            testcoin::claim(&mut vault, 50, scenario.ctx());
+            test_scenario::return_shared(vault);
+        };
+        scenario.next_tx(USER);
+        {
+            let mut vault: Vault = scenario.take_shared();
+            assert_eq_testcoin_coin(USER, 50, &scenario);
+            assert_pool_eq_testcoin_coin(&mut vault, b"lockup".to_string(), 950, &scenario);
             test_scenario::return_shared(vault);
         };
         scenario.end();
