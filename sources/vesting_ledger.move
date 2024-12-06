@@ -69,7 +69,9 @@ module testcoin::vesting_ledger {
         ctx: &mut TxContext,
     ) {
         let current_epoch = ledger.current_epoch;
+        let period = ledger.period;
         let account = ledger.user_mut(user, ctx);
+        account.prune_epochs(current_epoch, period);
         let mut i = 0;
         let len = account.entries.length();
         while (i < len) {
@@ -177,6 +179,42 @@ module testcoin::vesting_ledger {
             });
         };
         &mut ledger.accounts[user]
+    }
+
+    fun prune_epochs(
+        account: &mut Account,
+        current_epoch: u64,
+        period: u64,
+    ) {
+        let mut last_valid_epoch = 0;
+        let mut i = 0;
+        let len = account.entries.length();
+        while (i < len) {
+            let entry = &account.entries[i];
+            let epoch = entry.epoch;
+            let balance = entry.balance;
+            if (balance > 0 && current_epoch < epoch + period) {
+                if (i != last_valid_epoch) {
+                    account.entries.swap(i, last_valid_epoch);
+                };
+                last_valid_epoch = last_valid_epoch + 1;
+            };
+            i = i + 1;
+        };
+        let mut old_items = len - last_valid_epoch;
+        while (old_items > 0) {
+            let AccountEntry{ epoch: _, balance } = account.entries.pop_back();
+            account.instant_balance = account.instant_balance + balance;
+            old_items = old_items - 1;
+        };
+    }
+
+    #[test_only]
+    public fun account_history_len(
+        ledger: &VestingLedger,
+        user: address,
+    ): u64 {
+        ledger.accounts[user].entries.length()
     }
 }
 
@@ -561,6 +599,35 @@ module testcoin::vesting_ledger_tests {
 
         ledger.set_vesting_period(5);
         test_utils::assert_eq(ledger.available_balance(USER), 800);
+
+        test_utils::destroy(ledger);
+    }
+
+    #[test]
+    fun test_pruning_old_epochs() {
+        let mut ledger = vesting_ledger::create(4, &mut tx_context::dummy());
+        ledger.lock(USER, 1000, &mut tx_context::dummy());
+        ledger.advance_epoch();
+        ledger.lock(USER, 1000, &mut tx_context::dummy());
+        ledger.advance_epoch();
+        ledger.lock(USER, 1000, &mut tx_context::dummy());
+        ledger.advance_epoch();
+        ledger.lock(USER, 1000, &mut tx_context::dummy());
+        test_utils::assert_eq(ledger.available_balance(USER), 2500);
+        test_utils::assert_eq(ledger.account_history_len(USER), 4);
+        ledger.advance_epoch();
+
+        // Now on each subsequent lock or deposit, on new epochs, the old one
+        // are pruned and recorded as instant balance.
+
+        ledger.lock(USER, 1000, &mut tx_context::dummy());
+        test_utils::assert_eq(ledger.available_balance(USER), 3500);
+        test_utils::assert_eq(ledger.account_history_len(USER), 4);
+        ledger.advance_epoch();
+        ledger.lock(USER, 1000, &mut tx_context::dummy());
+        test_utils::assert_eq(ledger.account_history_len(USER), 4);
+        ledger.advance_epoch();
+        test_utils::assert_eq(ledger.available_balance(USER), 5250);
 
         test_utils::destroy(ledger);
     }
