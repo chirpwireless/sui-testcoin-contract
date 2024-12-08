@@ -71,16 +71,16 @@ module testcoin::vesting_ledger {
         let current_epoch = ledger.current_epoch;
         let period = ledger.period;
         let account = ledger.user_mut(user, ctx);
+
         account.prune_epochs(current_epoch, period);
-        let mut i = 0;
+
         let len = account.entries.length();
-        while (i < len) {
-            let entry = &mut account.entries[i];
+        if (len > 0) {
+            let entry = &mut account.entries[len - 1];
             if (entry.epoch == current_epoch) {
                 entry.balance = entry.balance + amount;
                 return
             };
-            i = i + 1;
         };
         account.entries.push_back(AccountEntry {
             epoch: current_epoch,
