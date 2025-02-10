@@ -23,6 +23,8 @@ module testcoin::testcoin {
     const EWrongVersion: u64 = 2;
     /// Error code used when an invalid pool is used in the schedule.
     const EInvalidPool: u64 = 3;
+    /// Error code used when an invalid argument is passed to a function.
+    const EInvalidArgument: u64 = 4;
 
     // === Constants ===
     /// Maximum supply of TESTCOIN tokens.
@@ -449,23 +451,42 @@ module testcoin::testcoin {
     /// - `period`: The new vesting period in epochs.
     ///
     /// ## Errors
+    /// - `EInvalidArgument`: If the period is not in the range [0; 1800].
     /// - `EWrongVersion`: If the vault version does not match the VAULT_VERSION.
     public fun set_vesting_period(
         _: &VestingAdminCap,
         vault: &mut Vault,
         period: u64,
     ) {
+        assert!(period <= 1800, EInvalidArgument);
         assert!(vault.version == VAULT_VERSION, EWrongVersion);
 
         let ledger: &mut VestingLedger<TESTCOIN> = vault.vesting_ledger();
         ledger.set_vesting_period(period);
     }
 
+
+
+    /// Sets the initial penalty.
+    ///
+    /// This function allows authorized users, holding the VestingAdminCap, to
+    /// set the new initial penalty. Changing the initial penalty affects all
+    /// previously locked coins.
+    ///
+    /// ## Parameters:
+    /// - `_`: Reference to the VestingAdminCap, ensuring execution by authorized users only.
+    /// - `vault`: Mutable reference to the Vault managing the vesting ledger.
+    /// - `penalty`: The new initial penalty.
+    ///
+    /// ## Errors
+    /// - `EInvalidArgument`: If the penalty is not in the range [0; 10_000_000_000].
+    /// - `EWrongVersion`: If the vault version does not match the VAULT_VERSION.
     public fun set_vesting_penalty(
         _: &VestingAdminCap,
         vault: &mut Vault,
         penalty: u64,
     ) {
+        assert!(penalty <= 10_000_000_000, EInvalidArgument);
         assert!(vault.version == VAULT_VERSION, EWrongVersion);
 
         let ledger: &mut VestingLedger<TESTCOIN> = vault.vesting_ledger();
