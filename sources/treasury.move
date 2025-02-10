@@ -245,6 +245,16 @@ module testcoin::treasury {
         df::remove_if_exists<vector<u8>, bool>(&mut treasury.id, MINT_BLOCKED);
     }
 
+    public(package) fun current_epoch<T>(treasury: &Treasury<T>): u64 {
+        let mut epoch = 0;
+        let mut i = 0;
+        while (i <= treasury.current_entry) {
+            epoch = epoch + treasury.schedule[i].current_epoch;
+            i = i + 1;
+        };
+        epoch
+    }
+
     // === Internal functions ===
 
     /// Mint coins following the specified parameters and return the time for
