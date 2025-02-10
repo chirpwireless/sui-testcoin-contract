@@ -1071,7 +1071,7 @@ module testcoin::testcoin_tests {
         {
             let mut vault: Vault = scenario.take_shared();
             assert_eq_testcoin_coin(USER, 50, &scenario);
-            assert_pool_eq_testcoin_coin(&mut vault, b"lockup".to_string(), 950, &scenario);
+            assert_pool_eq_testcoin_coin(&mut vault, b"lockup".to_string(), 450, &scenario);
             test_scenario::return_shared(vault);
         };
         scenario.end();

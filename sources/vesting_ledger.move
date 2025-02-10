@@ -2,6 +2,7 @@ module testcoin::vesting_ledger {
     // === Imports ===
     use sui::balance::{Self, Balance};
     use sui::coin::{Self, Coin};
+    use std::u64::{Self};
     use sui::object_table::{Self, ObjectTable};
 
     // === Constants ===
@@ -96,19 +97,22 @@ module testcoin::vesting_ledger {
         assert!(amount > 0, EInvalidAmount);
         let account = &mut ledger.accounts[user];
         let coin = coin::take<T>(&mut account.total, amount, ctx);
+
+        // First get the coins from the instant balance.
         let to_claim = if (amount <= account.instant_balance) {
             amount
         } else {
             account.instant_balance
         };
         account.instant_balance = account.instant_balance - to_claim;
+
         amount = amount - to_claim;
         let mut i = 0;
         let len = account.entries.length();
         let mut penalty_amount: u64 = 0;
         while(i < len && amount > 0) {
             let entry = &mut account.entries[i];
-            let (claimed, penalty) = entry.claim_entry(current_epoch, ledger.period, amount);
+            let (claimed, penalty) = entry.claim_entry(amount, ledger.initial_penalty, current_epoch, ledger.period);
             penalty_amount = penalty_amount + penalty;
             amount = amount - claimed;
             i = i + 1;
@@ -131,7 +135,7 @@ module testcoin::vesting_ledger {
         let len = account.entries.length();
         while (i < len) {
             let entry = &account.entries[i];
-            total = total + entry.claimable(current_epoch, ledger.period);
+            total = total + entry.claimable(ledger.initial_penalty, current_epoch, ledger.period);
             i = i + 1;
         };
         total
@@ -140,32 +144,41 @@ module testcoin::vesting_ledger {
 
     public(package) fun claimable(
         entry: &AccountEntry,
+        initial_penalty: u64,
         current_epoch: u64,
         claim_period: u64,
     ): u64 {
-        let unlock_per_epoch = 10000000000 / claim_period;
-        let elapsed_epochs = current_epoch - entry.epoch;
-        let mut claimable_percentage = (elapsed_epochs + 1) * unlock_per_epoch;
-        if (claimable_percentage > 10000000000) {
-            claimable_percentage = 10000000000;
-        };
-        (entry.balance * claimable_percentage) / 10000000000
+        let elapsed_epochs = u64::min(current_epoch - entry.epoch, claim_period);
+        let scale: u128 = 10_000_000_000;
+        let scale_claim_period = scale * (claim_period as u128);
+        let penalty_factor_passed_time: u128 = (initial_penalty as u128) * ((claim_period as u128) - (elapsed_epochs as u128));
+        assert!(penalty_factor_passed_time <= scale_claim_period, 31337);
+        let numerator_claimable: u128 = scale_claim_period - penalty_factor_passed_time;
+        let claimable_u128: u128 = (entry.balance as u128) * numerator_claimable / scale_claim_period;
+        let claimable: u64 = claimable_u128 as u64;
+        claimable
     }
 
     public(package) fun claim_entry(
         entry: &mut AccountEntry,
+        claim_amount: u64,
+        initial_penalty: u64,
         current_epoch: u64,
-        period: u64,
-        amount: u64,
+        claim_period: u64,
     ): (u64, u64) {
-            let max_claimable = entry.claimable(current_epoch, period);
-
-            let to_claim = if (amount <= max_claimable) amount else max_claimable;
-
-            let proportional_penalty = (to_claim * (entry.balance - max_claimable)) / max_claimable;
-            entry.balance = entry.balance - to_claim - proportional_penalty;
-
-            (to_claim, proportional_penalty)
+        assert!(entry.balance <= 300000000 * 10_000_000_000, 31337);
+        assert!(initial_penalty <= 10_000_000_000, 31337);
+        let elapsed_epochs = u64::min(current_epoch - entry.epoch, claim_period);
+        assert!(elapsed_epochs <= 1800, 31337);
+        assert!(claim_period <= 1800, 31337);
+        let max_claimable = entry.claimable(initial_penalty, current_epoch, claim_period);
+        let claim_amount = u64::min(claim_amount, max_claimable);
+        let scale: u128 = 10_000_000_000;
+        let scale_claim_period = scale * (claim_period as u128);
+        let penalty_factor_passed_time: u128 = (initial_penalty as u128) * ((claim_period as u128) - (elapsed_epochs as u128));
+        let penalty = (claim_amount as u128 * scale_claim_period as u128) / ( scale_claim_period - penalty_factor_passed_time) - (claim_amount as u128);
+        entry.balance = entry.balance - claim_amount - (penalty as u64);
+        (claim_amount, penalty as u64)
     }
 
     public(package) fun set_vesting_period<T>(
@@ -261,15 +274,15 @@ module testcoin::vesting_ledger_tests {
         let mut ledger = vesting_ledger::create<VESTING_LEDGER_TESTS>(PERIOD, INITIAL_PENALTY, &mut ctx);
         ledger.lock(USER, coin::mint_for_testing<VESTING_LEDGER_TESTS>(1000, &mut ctx), 0, &mut ctx);
         test_utils::assert_eq(ledger.available_balance(USER, 0), 100);
-        test_utils::assert_eq(ledger.available_balance(USER, 1), 200);
-        test_utils::assert_eq(ledger.available_balance(USER, 2), 300);
-        test_utils::assert_eq(ledger.available_balance(USER, 3), 400);
-        test_utils::assert_eq(ledger.available_balance(USER, 4), 500);
-        test_utils::assert_eq(ledger.available_balance(USER, 5), 600);
-        test_utils::assert_eq(ledger.available_balance(USER, 6), 700);
-        test_utils::assert_eq(ledger.available_balance(USER, 7), 800);
-        test_utils::assert_eq(ledger.available_balance(USER, 8), 900);
-        test_utils::assert_eq(ledger.available_balance(USER, 9), 1000);
+        test_utils::assert_eq(ledger.available_balance(USER, 1), 190);
+        test_utils::assert_eq(ledger.available_balance(USER, 2), 280);
+        test_utils::assert_eq(ledger.available_balance(USER, 3), 370);
+        test_utils::assert_eq(ledger.available_balance(USER, 4), 460);
+        test_utils::assert_eq(ledger.available_balance(USER, 5), 550);
+        test_utils::assert_eq(ledger.available_balance(USER, 6), 640);
+        test_utils::assert_eq(ledger.available_balance(USER, 7), 730);
+        test_utils::assert_eq(ledger.available_balance(USER, 8), 820);
+        test_utils::assert_eq(ledger.available_balance(USER, 9), 910);
         test_utils::assert_eq(ledger.available_balance(USER, 10), 1000);
         test_utils::destroy(ledger);
     }
@@ -292,32 +305,32 @@ module testcoin::vesting_ledger_tests {
         ledger.lock(USER, coin::mint_for_testing<VESTING_LEDGER_TESTS>(10, &mut ctx), 0, &mut ctx);
         test_utils::assert_eq(ledger.available_balance(USER, 0), 1);
         ledger.lock(USER, coin::mint_for_testing<VESTING_LEDGER_TESTS>(10, &mut ctx), 1, &mut ctx);
-        test_utils::assert_eq(ledger.available_balance(USER, 1), 3);
+        test_utils::assert_eq(ledger.available_balance(USER, 1), 2);
         ledger.lock(USER, coin::mint_for_testing<VESTING_LEDGER_TESTS>(10, &mut ctx), 2, &mut ctx);
-        test_utils::assert_eq(ledger.available_balance(USER, 2), 6);
+        test_utils::assert_eq(ledger.available_balance(USER, 2), 4);
         ledger.lock(USER, coin::mint_for_testing<VESTING_LEDGER_TESTS>(10, &mut ctx), 3, &mut ctx);
-        test_utils::assert_eq(ledger.available_balance(USER, 3), 10);
+        test_utils::assert_eq(ledger.available_balance(USER, 3), 7);
         ledger.lock(USER, coin::mint_for_testing<VESTING_LEDGER_TESTS>(10, &mut ctx), 4, &mut ctx);
-        test_utils::assert_eq(ledger.available_balance(USER, 4), 15);
+        test_utils::assert_eq(ledger.available_balance(USER, 4), 11);
         ledger.lock(USER, coin::mint_for_testing<VESTING_LEDGER_TESTS>(10, &mut ctx), 5, &mut ctx);
-        test_utils::assert_eq(ledger.available_balance(USER, 5), 21);
+        test_utils::assert_eq(ledger.available_balance(USER, 5), 16);
         ledger.lock(USER, coin::mint_for_testing<VESTING_LEDGER_TESTS>(10, &mut ctx), 6, &mut ctx);
-        test_utils::assert_eq(ledger.available_balance(USER, 6), 28);
+        test_utils::assert_eq(ledger.available_balance(USER, 6), 22);
         ledger.lock(USER, coin::mint_for_testing<VESTING_LEDGER_TESTS>(10, &mut ctx), 7, &mut ctx);
-        test_utils::assert_eq(ledger.available_balance(USER, 7), 36);
+        test_utils::assert_eq(ledger.available_balance(USER, 7), 29);
         ledger.lock(USER, coin::mint_for_testing<VESTING_LEDGER_TESTS>(10, &mut ctx), 8, &mut ctx);
-        test_utils::assert_eq(ledger.available_balance(USER, 8), 45);
+        test_utils::assert_eq(ledger.available_balance(USER, 8), 37);
         ledger.lock(USER, coin::mint_for_testing<VESTING_LEDGER_TESTS>(10, &mut ctx), 9, &mut ctx);
-        test_utils::assert_eq(ledger.available_balance(USER, 9), 55);
-        test_utils::assert_eq(ledger.available_balance(USER, 10), 64);
-        test_utils::assert_eq(ledger.available_balance(USER, 11), 72);
-        test_utils::assert_eq(ledger.available_balance(USER, 12), 79);
-        test_utils::assert_eq(ledger.available_balance(USER, 13), 85);
-        test_utils::assert_eq(ledger.available_balance(USER, 14), 90);
-        test_utils::assert_eq(ledger.available_balance(USER, 15), 94);
-        test_utils::assert_eq(ledger.available_balance(USER, 16), 97);
-        test_utils::assert_eq(ledger.available_balance(USER, 17), 99);
-        test_utils::assert_eq(ledger.available_balance(USER, 18), 100);
+        test_utils::assert_eq(ledger.available_balance(USER, 9), 46);
+        test_utils::assert_eq(ledger.available_balance(USER, 10), 55);
+        test_utils::assert_eq(ledger.available_balance(USER, 11), 64);
+        test_utils::assert_eq(ledger.available_balance(USER, 12), 72);
+        test_utils::assert_eq(ledger.available_balance(USER, 13), 79);
+        test_utils::assert_eq(ledger.available_balance(USER, 14), 85);
+        test_utils::assert_eq(ledger.available_balance(USER, 15), 90);
+        test_utils::assert_eq(ledger.available_balance(USER, 16), 94);
+        test_utils::assert_eq(ledger.available_balance(USER, 17), 97);
+        test_utils::assert_eq(ledger.available_balance(USER, 18), 99);
         test_utils::assert_eq(ledger.available_balance(USER, 19), 100);
         test_utils::destroy(ledger);
     }
@@ -441,30 +454,30 @@ module testcoin::vesting_ledger_tests {
         let mut ctx = tx_context::dummy();
         let mut ledger = vesting_ledger::create<VESTING_LEDGER_TESTS>(3, INITIAL_PENALTY, &mut ctx);
         ledger.lock(USER, coin::mint_for_testing<VESTING_LEDGER_TESTS>(1000, &mut ctx), 0, &mut ctx);
-        test_utils::assert_eq(ledger.available_balance(USER, 0), 333);
+        test_utils::assert_eq(ledger.available_balance(USER, 0), 100);
 
-        let (locked, penalty) = ledger.claim(USER, 82, 0, &mut ctx);
-        test_utils::assert_eq(ledger.available_balance(USER, 0), 251);
-        test_utils::assert_eq(penalty.value(), 164);
+        let (locked, penalty) = ledger.claim(USER, 25, 0, &mut ctx);
+        test_utils::assert_eq(ledger.available_balance(USER, 0), 75);
+        test_utils::assert_eq(penalty.value(), 225);
         test_utils::destroy(locked);
         test_utils::destroy(penalty);
 
-        let (locked, penalty) = ledger.claim(USER, 82, 0, &mut ctx);
-        test_utils::assert_eq(ledger.available_balance(USER, 0), 169);
-        test_utils::assert_eq(penalty.value(), 164);
+        let (locked, penalty) = ledger.claim(USER, 25, 0, &mut ctx);
+        test_utils::assert_eq(ledger.available_balance(USER, 0), 50);
+        test_utils::assert_eq(penalty.value(), 225);
         test_utils::destroy(locked);
         test_utils::destroy(penalty);
 
-        let (locked, penalty) = ledger.claim(USER, 82, 0, &mut ctx);
-        test_utils::assert_eq(ledger.available_balance(USER, 0), 87);
-        test_utils::assert_eq(penalty.value(), 164);
+        let (locked, penalty) = ledger.claim(USER, 25, 0, &mut ctx);
+        test_utils::assert_eq(ledger.available_balance(USER, 0), 25);
+        test_utils::assert_eq(penalty.value(), 225);
         test_utils::destroy(locked);
         test_utils::destroy(penalty);
 
         // Still can claim all the remaining coins.
-        let (locked, penalty) = ledger.claim(USER, 87, 0, &mut ctx);
+        let (locked, penalty) = ledger.claim(USER, 25, 0, &mut ctx);
         test_utils::assert_eq(ledger.available_balance(USER, 0), 0);
-        test_utils::assert_eq(penalty.value(), 175);
+        test_utils::assert_eq(penalty.value(), 225);
         test_utils::destroy(locked);
         test_utils::destroy(penalty);
         test_utils::destroy(ledger);
@@ -478,15 +491,15 @@ module testcoin::vesting_ledger_tests {
         test_utils::assert_eq(ledger.available_balance(USER, 0), 100);
 
         // Now 40% of coins are available, because each epoch unlocks 10%.
-        test_utils::assert_eq(ledger.available_balance(USER, 3), 400);
+        test_utils::assert_eq(ledger.available_balance(USER, 3), 370);
 
         // Claiming 100 coins now would incur only 150 coins of penalty
         // (instead of 900) since the penalty is reduced accordingly to elapsed
         // epochs.
         let (locked, penalty) = ledger.claim(USER, 100, 3, &mut ctx);
-        test_utils::assert_eq(ledger.available_balance(USER, 3), 300);
+        test_utils::assert_eq(ledger.available_balance(USER, 3), 270);
         test_utils::assert_eq(locked.value(), 100);
-        test_utils::assert_eq(penalty.value(), 150);
+        test_utils::assert_eq(penalty.value(), 170);
         test_utils::destroy(locked);
         test_utils::destroy(penalty);
 
@@ -499,18 +512,17 @@ module testcoin::vesting_ledger_tests {
         let mut ledger = vesting_ledger::create<VESTING_LEDGER_TESTS>(PERIOD, INITIAL_PENALTY, &mut ctx);
         ledger.lock(USER, coin::mint_for_testing<VESTING_LEDGER_TESTS>(1000, &mut ctx), 0, &mut ctx);
         test_utils::assert_eq(ledger.available_balance(USER, 0), 100);
-
-        test_utils::assert_eq(ledger.available_balance(USER, 1), 200);
-        test_utils::assert_eq(ledger.available_balance(USER, 2), 300);
-        test_utils::assert_eq(ledger.available_balance(USER, 3), 400);
-        test_utils::assert_eq(ledger.available_balance(USER, 4), 500);
-        test_utils::assert_eq(ledger.available_balance(USER, 5), 600);
-        test_utils::assert_eq(ledger.available_balance(USER, 6), 700);
-        test_utils::assert_eq(ledger.available_balance(USER, 7), 800);
-        test_utils::assert_eq(ledger.available_balance(USER, 8), 900);
-        test_utils::assert_eq(ledger.available_balance(USER, 9), 1000);
-        let (locked, penalty) = ledger.claim(USER, 1000, 9, &mut ctx);
-        test_utils::assert_eq(ledger.available_balance(USER, 9), 0);
+        test_utils::assert_eq(ledger.available_balance(USER, 1), 190);
+        test_utils::assert_eq(ledger.available_balance(USER, 2), 280);
+        test_utils::assert_eq(ledger.available_balance(USER, 3), 370);
+        test_utils::assert_eq(ledger.available_balance(USER, 4), 460);
+        test_utils::assert_eq(ledger.available_balance(USER, 5), 550);
+        test_utils::assert_eq(ledger.available_balance(USER, 6), 640);
+        test_utils::assert_eq(ledger.available_balance(USER, 7), 730);
+        test_utils::assert_eq(ledger.available_balance(USER, 8), 820);
+        test_utils::assert_eq(ledger.available_balance(USER, 9), 910);
+        let (locked, penalty) = ledger.claim(USER, 1000, 10, &mut ctx);
+        test_utils::assert_eq(ledger.available_balance(USER, 10), 0);
         test_utils::assert_eq(locked.value(), 1000);
         test_utils::assert_eq(penalty.value(), 0);
 
@@ -527,7 +539,7 @@ module testcoin::vesting_ledger_tests {
         test_utils::assert_eq(ledger.available_balance(USER, 0), 100);
 
         ledger.lock(USER, coin::mint_for_testing<VESTING_LEDGER_TESTS>(1000, &mut ctx), 1, &mut ctx);
-        test_utils::assert_eq(ledger.available_balance(USER, 1), 300);
+        test_utils::assert_eq(ledger.available_balance(USER, 1), 290);
 
         // Now it should be "unloked" to claim 20% of first 1000 coins and,
         // 10% of the second 1000 coins. So 300 coins in total.
@@ -537,9 +549,9 @@ module testcoin::vesting_ledger_tests {
         // only.
 
         let (locked, penalty) = ledger.claim(USER, 100, 1, &mut ctx);
-        test_utils::assert_eq(ledger.available_balance(USER, 1), 200);
+        test_utils::assert_eq(ledger.available_balance(USER, 1), 190);
         test_utils::assert_eq(locked.value(), 100);
-        test_utils::assert_eq(penalty.value(), 400);
+        test_utils::assert_eq(penalty.value(), 426);
 
         test_utils::destroy(locked);
         test_utils::destroy(penalty);
@@ -551,10 +563,10 @@ module testcoin::vesting_ledger_tests {
         let mut ctx = tx_context::dummy();
         let mut ledger = vesting_ledger::create<VESTING_LEDGER_TESTS>(PERIOD, INITIAL_PENALTY, &mut ctx);
         ledger.lock(USER, coin::mint_for_testing<VESTING_LEDGER_TESTS>(1000, &mut ctx), 0, &mut ctx);
-        test_utils::assert_eq(ledger.available_balance(USER, 0), 100);
+        test_utils::assert_eq(ledger.available_balance(USER, 1), 190);
 
         ledger.set_vesting_period(5);
-        test_utils::assert_eq(ledger.available_balance(USER, 0), 200);
+        test_utils::assert_eq(ledger.available_balance(USER, 1), 280);
 
         test_utils::destroy(ledger);
     }
@@ -567,18 +579,18 @@ module testcoin::vesting_ledger_tests {
         ledger.lock(USER, coin::mint_for_testing<VESTING_LEDGER_TESTS>(1000, &mut ctx), 1, &mut ctx);
         ledger.lock(USER, coin::mint_for_testing<VESTING_LEDGER_TESTS>(1000, &mut ctx), 2, &mut ctx);
         ledger.lock(USER, coin::mint_for_testing<VESTING_LEDGER_TESTS>(1000, &mut ctx), 3, &mut ctx);
-        test_utils::assert_eq(ledger.available_balance(USER, 3), 2500);
+        test_utils::assert_eq(ledger.available_balance(USER, 3), 1750);
         test_utils::assert_eq(ledger.account_history_len(USER), 4);
 
         // Now on each subsequent lock or deposit, on new epochs, the old one
         // are pruned and recorded as instant balance.
 
         ledger.lock(USER, coin::mint_for_testing<VESTING_LEDGER_TESTS>(1000, &mut ctx), 4, &mut ctx);
-        test_utils::assert_eq(ledger.available_balance(USER, 4), 3500);
+        test_utils::assert_eq(ledger.available_balance(USER, 4), 2750);
         test_utils::assert_eq(ledger.account_history_len(USER), 4);
 
         ledger.lock(USER, coin::mint_for_testing<VESTING_LEDGER_TESTS>(1000, &mut ctx), 5, &mut ctx);
-        test_utils::assert_eq(ledger.available_balance(USER, 5), 4500);
+        test_utils::assert_eq(ledger.available_balance(USER, 5), 3750);
         test_utils::assert_eq(ledger.account_history_len(USER), 4);
 
         test_utils::destroy(ledger);
