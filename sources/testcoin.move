@@ -513,7 +513,7 @@ module testcoin::testcoin {
         assert!(vault.version < VAULT_VERSION, ENotUpgrade);
         if (vault.version == 1) {
             vault.registry.add(VESTING_LEDGER.to_string(), vesting_ledger::create<TESTCOIN>(VESTING_PERIOD, INITIAL_PENALTY, ctx));
-            vault.pool_dispatcher().add_address_pool(b"lookup".to_string(), @0xf984db9a25afa6c73aae9ba20ff9c43919ac717881d6dfbb7d0149b7888e8b42);
+            vault.pool_dispatcher().add_address_pool(b"lookup".to_string(), @0xefaaecff5491118ffca9090afa473c53b937a5d2beb5b566c347bd386e5a656f);
             transfer::transfer(VestingAdminCap{id:object::new(ctx)}, ctx.sender());
             vault.version = vault.version + 1;
         };
